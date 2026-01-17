@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Messenger Pro</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        :root { --neon: #00f3ff; --dark: #050505; --panel: #111; --border: #333; --glass: rgba(0, 243, 255, 0.05); }
+        * { box-sizing: border-box; }
+        body { background: var(--dark); color: white; font-family: 'Segoe UI', monospace; margin: 0; height: 100vh; display: flex; overflow: hidden; }
+
+        /* MODALS */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 999; display: flex; justify-content: center; align-items: center; }
+        .modal-box { background: #222; border: 1px solid var(--neon); padding: 20px; width: 320px; border-radius: 10px; text-align: center; box-shadow: 0 0 20px rgba(0, 243, 255, 0.2); }
+        .hidden { display: none !important; }
+
+        /* LAYOUT */
+        .sidebar { width: 320px; background: var(--panel); border-right: 1px solid --border; display: flex; flex-direction: column; }
+        .main { flex: 1; display: flex; flex-direction: column; background: #000; position: relative; }
+
+        /* COMPONENTS */
+        .my-profile { padding: 20px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+        .list-header { padding: 10px 20px; background: #1a1a1a; font-size: 0.7em; color: gray; text-transform: uppercase; letter-spacing: 1px; margin-top: 10px; }
+        .contact-list { overflow-y: auto; flex: 1; }
+        
+        .contact-item { padding: 12px 20px; border-bottom: 1px solid #222; cursor: pointer; transition: 0.2s; display: flex; justify-content: space-between; align-items: center; }
+        .contact-item:hover { background: var(--glass); }
+        .contact-item.active { background: rgba(0, 243, 255, 0.1); border-left: 3px solid var(--neon); }
+        
+        .unsaved-item { background: rgba(255, 0, 0, 0.05); border-left: 3px solid red; }
+        .btn-save { background: var(--neon); border: none; color: black; padding: 2px 8px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .btn-ignore { background: #333; border: 1px solid #555; color: white; padding: 2px 8px; cursor: pointer; border-radius: 4px; }
+
+        /* CHAT & INPUT */
+        #chat-window { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .msg { max-width: 70%; padding: 10px 15px; border-radius: 8px; font-size: 0.9em; word-wrap: break-word; }
+        .msg.me { background: var(--neon); color: black; align-self: flex-end; }
+        .msg.them { background: #222; align-self: flex-start; border-left: 2px solid var(--neon); }
+        
+        .chat-input { padding: 15px; background: var(--panel); display: flex; gap: 10px; }
+        input { width: 100%; padding: 10px; background: black; border: 1px solid #444; color: white; border-radius: 4px; outline: none; }
+        button.primary { padding: 10px; background: var(--neon); color: black; font-weight: bold; border: none; cursor: pointer; border-radius: 4px; width: 100%; margin-top: 10px;}
+    </style>
+</head>
+<body>
+
+<div id="modal-setup" class="modal-overlay hidden">
+    <div class="modal-box">
+        <h3 id="modal-title" style="color:var(--neon)">SYSTEM CHECK</h3>
+        <p id="modal-desc">Memeriksa integritas data...</p>
+        <div id="modal-inputs"></div>
+        <div id="modal-actions" style="margin-top:15px;"></div>
+    </div>
+</div>
+
+<div id="modal-save-friend" class="modal-overlay hidden">
+    <div class="modal-box">
+        <h3>SIMPAN KONTAK</h3>
+        <p>Beri nama untuk teman ini:</p>
+        <input type="text" id="save-friend-name" placeholder="Nama Panggilan...">
+        <input type="hidden" id="save-friend-id">
+        <div style="display:flex; gap:5px; margin-top:10px;">
+            <button class="primary" onclick="confirmSaveContact()">SIMPAN</button>
+            <button onclick="closeModal('modal-save-friend')" style="flex:1; background:#333; color:white; border:none; cursor:pointer; margin-top:10px; border-radius:4px;">BATAL</button>
+        </div>
+    </div>
+</div>
+
+<div class="sidebar">
+    <div class="my-profile">
+        <h3 id="display-name">...</h3>
+        <small id="display-id" style="cursor:pointer; color:gray;" onclick="copyId()">Loading...</small>
+    </div>
+
+    <div id="section-unsaved" class="hidden">
+        <div class="list-header" style="color:#ff5555">⚠ Unsaved</div>
+        <div id="list-unsaved"></div>
+    </div>
+
+    <div class="list-header">Contacts</div>
+    <div id="list-saved" class="contact-list"></div>
+    
+    <div style="padding:10px;">
+        <input type="text" id="manual-add-id" placeholder="Tambah ID Manual...">
+        <button class="primary" style="margin-top:5px; font-size:0.8em;" onclick="addManual()">ADD CONTACT</button>
+    </div>
+</div>
+
+<div class="main">
+    <div style="padding:15px; background:rgba(0,0,0,0.5); border-bottom:1px solid #333; display:flex; justify-content:space-between;">
+        <span id="chat-header-name" style="font-weight:bold; color:var(--neon);">Pilih Kontak</span>
+        <span id="status-text" style="font-size:0.8em; color:gray;">Checking...</span>
+    </div>
+    <div id="chat-window"></div>
+    <div class="chat-input">
+        <input type="text" id="msg-input" placeholder="Ketik pesan..." disabled onkeypress="if(event.key==='Enter') sendMsg()">
+        <button class="primary" style="width:80px; margin-top:0;" onclick="sendMsg()">KIRIM</button>
+    </div>
+</div>
+
+<script>
+    const API_KEY = "NEON-SECRET-KEY-2024";
+    const generateId = () => {
+        const c = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+        let r=''; for(let i=0;i<8;i++) r+=c.charAt(Math.floor(Math.random()*c.length));
+        return r;
+    };
+
+    // State
+    let myId = localStorage.getItem('neon_id');
+    let myUsername = localStorage.getItem('neon_username');
+    let peer, activeConn, currentTargetId;
+    let contacts = [], unsaved = [];
+
+    // --- 1. SYSTEM STARTUP LOGIC (VALIDATION) ---
+    window.onload = async () => {
+        await startupCheck();
+    };
+
+    async function startupCheck() {
+        const modal = document.getElementById('modal-setup');
+        const title = document.getElementById('modal-title');
+        const desc = document.getElementById('modal-desc');
+        const inputs = document.getElementById('modal-inputs');
+        const actions = document.getElementById('modal-actions');
+        
+        modal.classList.remove('hidden');
+
+        // Kirim data lokal ke server untuk divalidasi
+        try {
+            const res = await fetch('/api/sync-check', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json', 'x-api-key':API_KEY},
+                body: JSON.stringify({ id: myId, username: myUsername })
+            });
+            const data = await res.json();
+
+            // LOGIKA VALIDASI (RULE 1-7)
+            switch(data.status) {
+                case 'RESET': // Rule 6: Baru/Hilang semua
+                    title.innerText = "SELAMAT DATANG";
+                    desc.innerText = "Buat identitas baru untuk memulai.";
+                    inputs.innerHTML = `<input id="new-name" placeholder="Nama Anda...">`;
+                    actions.innerHTML = `<button class="primary" onclick="completeSetup(true)">MULAI</button>`;
+                    break;
+
+                case 'SERVER_ID_LOST': // Rule 5: ID Local ada, Server tidak kenal
+                    title.innerText = "ERROR SINKRONISASI";
+                    desc.innerText = `ID Lokal (${myId}) tidak ditemukan di server.`;
+                    inputs.innerHTML = "";
+                    actions.innerHTML = `
+                        <button class="primary" onclick="completeSetup(true)">BUAT AKUN BARU (RESET)</button>
+                        <button class="primary" style="background:#555; margin-top:5px;" onclick="forceRegister()">PAKSA GUNAKAN ID INI</button>`;
+                    break;
+
+                case 'DB_NAME_LOST': // Rule 1: Username Server Hilang
+                    title.innerText = "DATA SERVER HILANG";
+                    desc.innerText = `Server lupa namamu, tapi di HP ini ada (${data.localName}). Gunakan nama ini?`;
+                    actions.innerHTML = `<button class="primary" onclick="fixProfile('${data.localName}')">YA, GUNAKAN ${data.localName}</button>`;
+                    break;
+                
+                case 'LOCAL_NAME_LOST': // Rule 2: Username Local Hilang
+                    title.innerText = "DATA LOKAL HILANG";
+                    desc.innerText = `Namamu hilang di HP ini, tapi Server mencatat: ${data.serverName}. Kembalikan?`;
+                    actions.innerHTML = `<button class="primary" onclick="restoreLocal('${data.serverName}')">YA, KEMBALIKAN</button>`;
+                    break;
+
+                case 'BOTH_NAME_LOST': // Rule 3: Nama Hilang Semua
+                    title.innerText = "IDENTITAS TIDAK LENGKAP";
+                    desc.innerText = "ID valid, tapi nama pengguna hilang. Masukkan nama baru.";
+                    inputs.innerHTML = `<input id="new-name" placeholder="Nama Baru...">`;
+                    actions.innerHTML = `<button class="primary" onclick="completeSetup(false)">UPDATE</button>`;
+                    break;
+
+                case 'OK':
+                    modal.classList.add('hidden');
+                    initApp();
+                    break;
+            }
+        } catch (e) {
+            console.error(e);
+            desc.innerText = "Gagal terhubung ke server.";
+        }
+    }
+
+    // --- HELPER UNTUK PERBAIKAN AKUN ---
+    async function completeSetup(isReset) {
+        const name = document.getElementById('new-name').value.trim();
+        if(!name) return alert("Wajib isi nama!");
+        
+        if(isReset) {
+            myId = generateId(); // Generate Baru
+            localStorage.setItem('neon_id', myId);
+        }
+        await updateProfileServer(myId, name);
+    }
+
+    async function forceRegister() {
+        // Kasus ID ada di local, tapi server lupa. Kita paksa register ulang ID lama.
+        const name = prompt("Masukkan nama anda untuk ID ini:");
+        if(name) await updateProfileServer(myId, name);
+    }
+
+    async function fixProfile(name) {
+        await updateProfileServer(myId, name);
+    }
+
+    async function restoreLocal(serverName) {
+        localStorage.setItem('neon_username', serverName);
+        location.reload();
+    }
+
+    async function updateProfileServer(id, name) {
+        localStorage.setItem('neon_username', name);
+        myUsername = name;
+        
+        await fetch('/api/update-profile', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json', 'x-api-key':API_KEY},
+            body: JSON.stringify({ id: id, username: name })
+        });
+        
+        document.getElementById('modal-setup').classList.add('hidden');
+        initApp();
+    }
+
+    // --- 2. MAIN APP ---
+    function initApp() {
+        document.getElementById('display-name').innerText = myUsername;
+        document.getElementById('display-id').innerText = "ID: " + myId;
+        document.getElementById('msg-input').disabled = false;
+
+        const isSecure = location.protocol === 'https:';
+        peer = new Peer(myId, {
+            host: location.hostname,
+            port: isSecure ? 443 : (location.port || 80),
+            path: '/peerjs/myapp',
+            secure: isSecure
+        });
+
+        peer.on('open', () => {
+            document.getElementById('status-text').innerText = "🟢 Online";
+            syncData();
+        });
+
+        peer.on('connection', (conn) => {
+            conn.on('data', (data) => {
+                // Saat terima pesan, Sync Data ulang agar pesan masuk ke history UI
+                // Karena server sudah simpan, kita tinggal tarik data baru
+                setTimeout(syncData, 500); 
+                if(data.sender !== currentTargetId) { /* Notif suara bisa disini */ }
+            });
+        });
+    }
+
+    async function syncData() {
+        const res = await fetch(`/api/data/${myId}`);
+        const data = await res.json();
+        contacts = data.saved || [];
+        unsaved = data.unsaved || [];
+        renderLists();
+        
+        // Refresh chat window kalau sedang buka chat orang ini
+        if(currentTargetId) {
+            const currentContact = contacts.find(c => c.id === currentTargetId) || unsaved.find(u => u.id === currentTargetId);
+            if(currentContact && currentContact.messages) renderChatWindow(currentContact.messages);
+        }
+    }
+
+    function renderLists() {
+        const savedList = document.getElementById('list-saved');
+        savedList.innerHTML = "";
+        contacts.forEach(c => {
+            const div = document.createElement('div');
+            div.className = `contact-item ${currentTargetId === c.id ? 'active' : ''}`;
+            div.innerHTML = `<div><b>${c.name}</b><br><small style='font-size:0.7em'>${c.id}</small></div>`;
+            div.onclick = () => openChat(c.id, c.name, true);
+            savedList.appendChild(div);
+        });
+
+        const unsavedList = document.getElementById('list-unsaved');
+        const unsavedSec = document.getElementById('section-unsaved');
+        unsavedList.innerHTML = "";
+        
+        if(unsaved.length > 0) {
+            unsavedSec.classList.remove('hidden');
+            unsaved.forEach(u => {
+                const div = document.createElement('div');
+                div.className = "contact-item unsaved-item";
+                div.innerHTML = `
+                    <div onclick="openChat('${u.id}', '~[${u.original_username}]', false)">
+                        <span style="color:#ffaaaa">~[${u.original_username}]</span><br><small>${u.id}</small>
+                    </div>
+                    <div>
+                        <button class="btn-save" onclick="promptSave('${u.id}')">SAVE</button>
+                        <button class="btn-ignore" onclick="ignoreUser('${u.id}')">X</button>
+                    </div>`;
+                unsavedList.appendChild(div);
+            });
+        } else {
+            unsavedSec.classList.add('hidden');
+        }
+    }
+
+    function openChat(id, name, isSaved) {
+        currentTargetId = id;
+        document.getElementById('chat-header-name').innerText = name;
+        
+        // Load History
+        const list = isSaved ? contacts : unsaved;
+        const user = list.find(u => u.id === id);
+        renderChatWindow(user ? user.messages : []);
+
+        // PeerJS Connection (Untuk kirim real-time)
+        if(activeConn) activeConn.close();
+        activeConn = peer.connect(id, { metadata: { username: myUsername } });
+        activeConn.on('open', () => document.getElementById('status-text').innerText = "🔵 Connected");
+    }
+
+    function renderChatWindow(msgs) {
+        const win = document.getElementById('chat-window');
+        win.innerHTML = "";
+        if(!msgs) return;
+
+        msgs.forEach(m => {
+            const div = document.createElement('div');
+            // 'me' = You, 'them' = (S)he
+            div.className = `msg ${m.type}`; 
+            div.innerText = m.text;
+            win.appendChild(div);
+        });
+        win.scrollTop = win.scrollHeight;
+    }
+
+    async function sendMsg() {
+        const input = document.getElementById('msg-input');
+        const msg = input.value;
+        if(!msg || !currentTargetId) return;
+
+        // 1. Kirim via PeerJS (Realtime UI lawan)
+        if(activeConn && activeConn.open) {
+            activeConn.send({ sender: myId, msg: msg });
+        }
+
+        // 2. Simpan ke Server (Database)
+        await fetch('/api/store-message', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json', 'x-api-key':API_KEY},
+            body: JSON.stringify({ 
+                senderId: myId, 
+                receiverId: currentTargetId, 
+                msg: msg, 
+                senderName: myUsername 
+            })
+        });
+
+        input.value = "";
+        syncData(); // Refresh UI sendiri
+    }
+
+    // --- ACTIONS ---
+    function promptSave(id) {
+        document.getElementById('save-friend-id').value = id;
+        document.getElementById('save-friend-name').value = "";
+        document.getElementById('modal-save-friend').classList.remove('hidden');
+    }
+
+    async function confirmSaveContact() {
+        const id = document.getElementById('save-friend-id').value;
+        const name = document.getElementById('save-friend-name').value.trim();
+        if(!name) return;
+
+        await fetch('/api/save-contact', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json', 'x-api-key':API_KEY},
+            body: JSON.stringify({ myId: myId, friendId: id, customName: name })
+        });
+        closeModal('modal-save-friend');
+        syncData();
+    }
+
+    async function ignoreUser(id) {
+        if(!confirm("Hapus chat ini?")) return;
+        await fetch('/api/ignore-contact', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json', 'x-api-key':API_KEY},
+            body: JSON.stringify({ myId: myId, targetId: id })
+        });
+        syncData();
+    }
+
+    async function addManual() {
+        const id = document.getElementById('manual-add-id').value.trim();
+        if(id) promptSave(id);
+    }
+
+    function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+    function copyId() { navigator.clipboard.writeText(myId); alert("ID Copied"); }
+</script>
+
+</body>
+</html>
