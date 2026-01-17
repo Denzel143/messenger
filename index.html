@@ -127,25 +127,33 @@
         
         modal.classList.remove('hidden');
 
-        // Kirim data lokal ke server untuk divalidasi
         try {
+            console.log("Mencoba menghubungi server di: " + location.origin + '/api/sync-check');
+            
             const res = await fetch('/api/sync-check', {
                 method: 'POST',
                 headers: {'Content-Type':'application/json', 'x-api-key':API_KEY},
                 body: JSON.stringify({ id: myId, username: myUsername })
             });
+
+            // LOGIKA DEBUGGING (Baru)
+            if (!res.ok) {
+                // Jika server membalas tapi error (misal 404 Not Found atau 500 Server Error)
+                throw new Error(`Server Error: ${res.status} (${res.statusText})`);
+            }
+
             const data = await res.json();
 
             // LOGIKA VALIDASI (RULE 1-7)
             switch(data.status) {
-                case 'RESET': // Rule 6: Baru/Hilang semua
+                case 'RESET': 
                     title.innerText = "SELAMAT DATANG";
                     desc.innerText = "Buat identitas baru untuk memulai.";
                     inputs.innerHTML = `<input id="new-name" placeholder="Nama Anda...">`;
                     actions.innerHTML = `<button class="primary" onclick="completeSetup(true)">MULAI</button>`;
                     break;
 
-                case 'SERVER_ID_LOST': // Rule 5: ID Local ada, Server tidak kenal
+                case 'SERVER_ID_LOST':
                     title.innerText = "ERROR SINKRONISASI";
                     desc.innerText = `ID Lokal (${myId}) tidak ditemukan di server.`;
                     inputs.innerHTML = "";
@@ -154,19 +162,19 @@
                         <button class="primary" style="background:#555; margin-top:5px;" onclick="forceRegister()">PAKSA GUNAKAN ID INI</button>`;
                     break;
 
-                case 'DB_NAME_LOST': // Rule 1: Username Server Hilang
+                case 'DB_NAME_LOST':
                     title.innerText = "DATA SERVER HILANG";
                     desc.innerText = `Server lupa namamu, tapi di HP ini ada (${data.localName}). Gunakan nama ini?`;
                     actions.innerHTML = `<button class="primary" onclick="fixProfile('${data.localName}')">YA, GUNAKAN ${data.localName}</button>`;
                     break;
                 
-                case 'LOCAL_NAME_LOST': // Rule 2: Username Local Hilang
+                case 'LOCAL_NAME_LOST':
                     title.innerText = "DATA LOKAL HILANG";
                     desc.innerText = `Namamu hilang di HP ini, tapi Server mencatat: ${data.serverName}. Kembalikan?`;
                     actions.innerHTML = `<button class="primary" onclick="restoreLocal('${data.serverName}')">YA, KEMBALIKAN</button>`;
                     break;
 
-                case 'BOTH_NAME_LOST': // Rule 3: Nama Hilang Semua
+                case 'BOTH_NAME_LOST':
                     title.innerText = "IDENTITAS TIDAK LENGKAP";
                     desc.innerText = "ID valid, tapi nama pengguna hilang. Masukkan nama baru.";
                     inputs.innerHTML = `<input id="new-name" placeholder="Nama Baru...">`;
@@ -180,7 +188,13 @@
             }
         } catch (e) {
             console.error(e);
-            desc.innerText = "Gagal terhubung ke server.";
+            // Tampilkan error asli di layar agar kita bisa diagnose
+            title.innerText = "GAGAL TERHUBUNG";
+            title.style.color = "red";
+            desc.innerHTML = `Terjadi kesalahan saat menghubungi server.<br><br>
+                              <small style="color:yellow; font-family:monospace;">${e.message}</small><br><br>
+                              Tips: Pastikan server.js sudah direstart.`;
+            actions.innerHTML = `<button class="primary" onclick="location.reload()">COBA LAGI</button>`;
         }
     }
 
